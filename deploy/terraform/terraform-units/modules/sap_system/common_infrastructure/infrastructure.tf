@@ -1,25 +1,17 @@
-##################################################################################################################
-# RESOURCES
-##################################################################################################################
-
-# RESOURCE GROUP =================================================================================================
-
-# Creates the resource group
+// Creates the resource group
 resource "azurerm_resource_group" "resource_group" {
   count    = local.rg_exists ? 0 : 1
   name     = local.rg_name
   location = local.region
 }
 
-# Imports data of existing resource group
+// Imports data of existing resource group
 data "azurerm_resource_group" "resource_group" {
   count = local.rg_exists ? 1 : 0
-  name  = split("/", local.rg_arm_id)[4]
+  name  = local.rg_name
 }
 
-# VNETs ==========================================================================================================
-
-# Creates the SAP VNET
+// Creates the SAP VNET
 resource "azurerm_virtual_network" "vnet_sap" {
   count               = local.vnet_sap_exists ? 0 : 1
   name                = local.vnet_sap_name
@@ -28,7 +20,7 @@ resource "azurerm_virtual_network" "vnet_sap" {
   address_space       = [local.vnet_sap_addr]
 }
 
-# Imports data of existing SAP VNET
+// Imports data of existing SAP VNET
 data "azurerm_virtual_network" "vnet_sap" {
   count               = local.vnet_sap_exists ? 1 : 0
   name                = split("/", local.vnet_sap_arm_id)[8]
@@ -44,7 +36,7 @@ resource "azurerm_subnet" "admin" {
   address_prefixes     = [local.sub_admin_prefix]
 }
 
-# Imports data of existing SAP admin subnet
+// Imports data of existing SAP admin subnet
 data "azurerm_subnet" "admin" {
   count                = local.sub_admin_exists && local.enable_admin_subnet ? 1 : 0
   name                 = split("/", local.sub_admin_arm_id)[10]
@@ -92,9 +84,31 @@ resource "azurerm_virtual_network_peering" "peering_sap_management" {
   allow_forwarded_traffic      = true
 }
 
-# STORAGE ACCOUNTS ===============================================================================================
+// Creates SAP admin subnet nsg
+resource "azurerm_network_security_group" "admin" {
+  count               = local.sub_admin_nsg_exists && local.enable_admin_subnet ? 0 : 1
+  name                = local.sub_admin_nsg_name
+  resource_group_name = local.rg_exists ? data.azurerm_resource_group.resource_group[0].name : azurerm_resource_group.resource_group[0].name
+  location            = local.rg_exists ? data.azurerm_resource_group.resource_group[0].location : azurerm_resource_group.resource_group[0].location
+}
 
+// Imports the SAP admin subnet nsg data
+data "azurerm_network_security_group" "admin" {
+  count               = local.sub_admin_nsg_exists && local.enable_admin_subnet ? 1 : 0
+  name                = split("/", local.sub_admin_nsg_arm_id)[8]
+  resource_group_name = split("/", local.sub_admin_nsg_arm_id)[4]
+}
+
+// Associates SAP admin nsg to SAP admin subnet
+resource "azurerm_subnet_network_security_group_association" "Associate_admin" {
+  count                     = local.enable_admin_subnet ? (signum((local.sub_admin_exists ? 0 : 1) + (local.sub_admin_nsg_exists ? 0 : 1))) : 0
+  subnet_id                 = local.sub_admin_exists ? data.azurerm_subnet.admin[0].id : azurerm_subnet.admin[0].id
+  network_security_group_id = local.sub_admin_nsg_exists ? data.azurerm_network_security_group.admin[0].id : azurerm_network_security_group.admin[0].id
+}
+
+# STORAGE ACCOUNTS ===============================================================================================
 # Creates boot diagnostics storage account
+
 resource "azurerm_storage_account" "storage_bootdiag" {
   name                      = local.storageaccount_name
   resource_group_name       = local.rg_exists ? data.azurerm_resource_group.resource_group[0].name : azurerm_resource_group.resource_group[0].name
@@ -104,8 +118,7 @@ resource "azurerm_storage_account" "storage_bootdiag" {
   enable_https_traffic_only = var.options.enable_secure_transfer == "" ? true : var.options.enable_secure_transfer
 }
 
-
-# PROXIMITY PLACEMENT GROUP ===============================================================================================
+// PROXIMITY PLACEMENT GROUP
 
 resource "azurerm_proximity_placement_group" "ppg" {
   count               = local.ppg_exists ? 0 : (local.zonal_deployment ? max(length(local.zones), 1) : 1)
@@ -113,7 +126,6 @@ resource "azurerm_proximity_placement_group" "ppg" {
   resource_group_name = local.rg_exists ? data.azurerm_resource_group.resource_group[0].name : azurerm_resource_group.resource_group[0].name
   location            = local.rg_exists ? data.azurerm_resource_group.resource_group[0].location : azurerm_resource_group.resource_group[0].location
 }
-
 
 data "azurerm_proximity_placement_group" "ppg" {
   count               = local.ppg_exists ? 1 : 0
